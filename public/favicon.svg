@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Prisma logo: three geometric segments forming a stylized diamond/prism shape -->
+  <!-- Top segment: upward-pointing triangle -->
+  <polygon points="50,15 30,40 70,40" fill="#000000"/>
+  <!-- Middle segment: horizontal rectangle (right edge extends further than top triangle) -->
+  <rect x="30" y="40" width="45" height="18" fill="#000000"/>
+  <!-- Bottom segment: downward-pointing triangle -->
+  <polygon points="30,58 50,85 70,58" fill="#000000"/>
+</svg>
