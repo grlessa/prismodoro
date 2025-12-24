@@ -1,0 +1,21 @@
+@font-face {
+  font-family: 'Neue Haas Display';
+  src: url('/NeueHaasDisplay-Mediu.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    font-family: 'Neue Haas Display', sans-serif !important;
+  }
+  
+  .font-sans, .font-mono, .font-serif {
+    font-family: 'Neue Haas Display', sans-serif !important;
+  }
+}
