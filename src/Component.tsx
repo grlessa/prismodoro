@@ -47,11 +47,12 @@ const playAlarmSound = () => {
     oscillator.frequency.value = 800; // Hz
     oscillator.type = 'sine';
     
-    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+    // Increased volume from 0.3 to 0.6 (60%) for better perceptibility without being too loud
+    gainNode.gain.setValueAtTime(0.6, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.7);
     
     oscillator.start(audioContext.currentTime);
-    oscillator.stop(audioContext.currentTime + 0.5);
+    oscillator.stop(audioContext.currentTime + 0.7);
   } catch (error) {
     // Fallback: if Web Audio API fails, silently fail
     console.warn('Could not play alarm sound:', error);
@@ -168,8 +169,17 @@ export function PrismodoroUI({ defaultMinutes = 25, onFinish }: PrismodoroProps)
   const clearHover = () => setHelpText('');
 
   // --- MISSING LOGIC RESTORED ---
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const totalDuration = targetMinutes * 60;
+  // #region agent log
+  const startTimeRef = useRef<number | null>(null); // Timestamp when timer started
+  const initialTimeLeftRef = useRef<number | null>(null); // Initial timeLeft when timer started
+  const breakStartTimeRef = useRef<number | null>(null); // Timestamp when break timer started
+  const initialBreakTimeLeftRef = useRef<number | null>(null); // Initial breakTimeLeft when break timer started
+  const flowStartTimeRef = useRef<number | null>(null); // Timestamp when flow timer started
+  const lastTickTimeRef = useRef<number | null>(null); // Timestamp of last tick
+  const tickCountRef = useRef<number>(0); // Number of ticks executed
+  // #endregion
 
   // Ensure cycle counter starts at 0 on component mount (page load/refresh)
   // This guarantees that each browser session starts fresh
@@ -184,6 +194,34 @@ export function PrismodoroUI({ defaultMinutes = 25, onFinish }: PrismodoroProps)
     };
   }, []);
 
+  // Monitor tab visibility changes and recalculate time immediately when tab becomes visible
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/8cb586c9-cde7-404b-b8bd-5067d1f98970',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Component.tsx:186',message:'Tab visibility changed',data:{isHidden:document.hidden,status,timeLeft,startTime:startTimeRef.current,currentTime:Date.now()},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'D'})}).catch(()=>{});
+      // #endregion
+      
+      // When tab becomes visible, immediately recalculate timeLeft based on real elapsed time
+      if (!document.hidden && status === 'running' && startTimeRef.current !== null && initialTimeLeftRef.current !== null) {
+        const elapsedSeconds = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        const calculatedTimeLeft = Math.max(0, initialTimeLeftRef.current - elapsedSeconds);
+        setTimeLeft(calculatedTimeLeft);
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/8cb586c9-cde7-404b-b8bd-5067d1f98970',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Component.tsx:202',message:'TimeLeft recalculated on tab visible',data:{calculatedTimeLeft,elapsedSeconds,initialTimeLeft:initialTimeLeftRef.current},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
+      }
+      
+      // Same for break timer
+      if (!document.hidden && status === 'break' && breakStartTimeRef.current !== null && initialBreakTimeLeftRef.current !== null) {
+        const elapsedSeconds = Math.floor((Date.now() - breakStartTimeRef.current) / 1000);
+        const calculatedBreakTimeLeft = Math.max(0, initialBreakTimeLeftRef.current - elapsedSeconds);
+        setBreakTimeLeft(calculatedBreakTimeLeft);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [status, timeLeft, breakTimeLeft]);
+
   // Update timeLeft when targetMinutes changes in setup
   useEffect(() => {
     if (status === 'setup' || status === 'idle') {
@@ -194,15 +232,47 @@ export function PrismodoroUI({ defaultMinutes = 25, onFinish }: PrismodoroProps)
   // Timer Logic
   useEffect(() => {
     if (status === 'running') {
+      // #region agent log
+      const now = Date.now();
+      // Always reset running timer when entering running status (ensures fresh start)
+      startTimeRef.current = now;
+      initialTimeLeftRef.current = timeLeft;
+      lastTickTimeRef.current = now;
+      tickCountRef.current = 0;
+      // Reset other timer refs
+      breakStartTimeRef.current = null;
+      initialBreakTimeLeftRef.current = null;
+      flowStartTimeRef.current = null;
+      fetch('http://127.0.0.1:7243/ingest/8cb586c9-cde7-404b-b8bd-5067d1f98970',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Component.tsx:196',message:'Timer started',data:{status,timeLeft,targetMinutes,isTabHidden:document.hidden,startTime:now},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       timerRef.current = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
+        // #region agent log
+        const tickNow = Date.now();
+        const timeSinceLastTick = lastTickTimeRef.current ? tickNow - lastTickTimeRef.current : 0;
+        const totalElapsed = startTimeRef.current ? tickNow - startTimeRef.current : 0;
+        tickCountRef.current += 1;
+        lastTickTimeRef.current = tickNow;
+        fetch('http://127.0.0.1:7243/ingest/8cb586c9-cde7-404b-b8bd-5067d1f98970',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Component.tsx:198',message:'Timer tick',data:{tickCount:tickCountRef.current,timeSinceLastTick,totalElapsed,expectedTicks:Math.floor(totalElapsed/1000),isTabHidden:document.hidden},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
+        // #endregion
+        // Calculate timeLeft based on real elapsed time (timestamp-based, not tick-based)
+        if (startTimeRef.current !== null && initialTimeLeftRef.current !== null) {
+          const elapsedSeconds = Math.floor((Date.now() - startTimeRef.current) / 1000);
+          const calculatedTimeLeft = Math.max(0, initialTimeLeftRef.current - elapsedSeconds);
+          
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/8cb586c9-cde7-404b-b8bd-5067d1f98970',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Component.tsx:229',message:'TimeLeft calculated from timestamp',data:{calculatedTimeLeft,elapsedSeconds,initialTimeLeft:initialTimeLeftRef.current},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'B'})}).catch(()=>{});
+          // #endregion
+          
+          if (calculatedTimeLeft <= 0) {
             // Clear interval before state transition to prevent continuation
             if (timerRef.current) {
               clearInterval(timerRef.current);
               timerRef.current = null;
             }
-            
+            // #region agent log
+            const finalElapsed = startTimeRef.current ? Date.now() - startTimeRef.current : 0;
+            fetch('http://127.0.0.1:7243/ingest/8cb586c9-cde7-404b-b8bd-5067d1f98970',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Component.tsx:199',message:'Timer finished',data:{finalElapsed,expectedTime:targetMinutes*60*1000,timeDifference:finalElapsed-(targetMinutes*60*1000),tickCount:tickCountRef.current},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'B'})}).catch(()=>{});
+            // #endregion
             // Check Focus Mode
             if (focusMode === 'classic') {
               // Classic Mode: Play alarm and stop immediately when time is up
@@ -211,24 +281,51 @@ export function PrismodoroUI({ defaultMinutes = 25, onFinish }: PrismodoroProps)
               // Increment Pomodoro cycle counter when session completes
               setPomodoroCycles(prev => prev + 1);
               setStatus('summary');
-              return 0;
             } else {
               // Prisma Mode: Switch to Flow State (Overtime)
               setStatus('flow');
-              return 0;
             }
+            setTimeLeft(0);
+          } else {
+            setTimeLeft(calculatedTimeLeft);
           }
-          return prev - 1;
-        });
+        }
       }, 1000);
     } else if (status === 'flow') {
+      // #region agent log
+      // Always reset flow timer when entering flow status (ensures fresh start)
+      flowStartTimeRef.current = Date.now();
+      // Reset other timer refs
+      startTimeRef.current = null;
+      initialTimeLeftRef.current = null;
+      breakStartTimeRef.current = null;
+      initialBreakTimeLeftRef.current = null;
+      // #endregion
       timerRef.current = setInterval(() => {
-        setFlowTime((prev) => prev + 1);
+        // Calculate flowTime based on real elapsed time
+        if (flowStartTimeRef.current !== null) {
+          const elapsedSeconds = Math.floor((Date.now() - flowStartTimeRef.current) / 1000);
+          setFlowTime(elapsedSeconds);
+        }
       }, 1000);
     } else if (status === 'break') {
+      // #region agent log
+      const now = Date.now();
+      // Always reset break timer when entering break status (ensures fresh start)
+      breakStartTimeRef.current = now;
+      initialBreakTimeLeftRef.current = breakTimeLeft;
+      // Reset other timer refs
+      startTimeRef.current = null;
+      initialTimeLeftRef.current = null;
+      flowStartTimeRef.current = null;
+      // #endregion
       timerRef.current = setInterval(() => {
-        setBreakTimeLeft((prev) => {
-          if (prev <= 1) {
+        // Calculate breakTimeLeft based on real elapsed time (timestamp-based, not tick-based)
+        if (breakStartTimeRef.current !== null && initialBreakTimeLeftRef.current !== null) {
+          const elapsedSeconds = Math.floor((Date.now() - breakStartTimeRef.current) / 1000);
+          const calculatedBreakTimeLeft = Math.max(0, initialBreakTimeLeftRef.current - elapsedSeconds);
+          
+          if (calculatedBreakTimeLeft <= 0) {
             // Clear interval before state transition
             if (timerRef.current) {
               clearInterval(timerRef.current);
@@ -236,13 +333,25 @@ export function PrismodoroUI({ defaultMinutes = 25, onFinish }: PrismodoroProps)
             }
             // Optional: play a gentle sound when break ends
             setStatus('breakEnd');
-            return 0;
+            setBreakTimeLeft(0);
+          } else {
+            setBreakTimeLeft(calculatedBreakTimeLeft);
           }
-          return prev - 1;
-        });
+        }
       }, 1000);
     } else {
+      // Reset refs when timer is not running
+      // #region agent log
+      startTimeRef.current = null;
+      initialTimeLeftRef.current = null;
+      breakStartTimeRef.current = null;
+      initialBreakTimeLeftRef.current = null;
+      flowStartTimeRef.current = null;
+      // #endregion
       if (timerRef.current) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/8cb586c9-cde7-404b-b8bd-5067d1f98970',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Component.tsx:245',message:'Timer cleared (status change)',data:{status,hadTimer:timerRef.current!==null},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
@@ -250,6 +359,9 @@ export function PrismodoroUI({ defaultMinutes = 25, onFinish }: PrismodoroProps)
 
     return () => {
       if (timerRef.current) {
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/8cb586c9-cde7-404b-b8bd-5067d1f98970',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Component.tsx:251',message:'Timer cleanup (useEffect)',data:{status},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
